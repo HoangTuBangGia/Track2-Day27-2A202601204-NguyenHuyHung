@@ -50,6 +50,13 @@ def main() -> None:
         [d["content"] for d in docs], history["mean_text_length"].tail(14).tolist()
     )
 
+    kb_contract = load_contract(ROOT / "contracts" / "kb_contract.yaml")
+    import pandas as _pd
+    kb_df = _pd.DataFrame(docs)
+    kb_issues = validate_dataframe(kb_df, kb_contract)
+    kb_failed = failed_issues(kb_issues)
+    kb_freshness_issues = [i for i in kb_failed if i.get("check") == "freshness"]
+
     # Demo SLO: one check event for this run.
     bad = 1 if critical_failed else 0
     contract_slo = calculate_slo(0.999, bad_events=bad, total_events=1)
@@ -57,6 +64,7 @@ def main() -> None:
     with open(ROOT / "data" / "baseline" / "lineage_graph.json", "r", encoding="utf-8") as f:
         lineage = json.load(f)["dataset_lineage"]
     blast_radius = get_downstream_assets(lineage, "stg_orders")
+    kb_blast = get_downstream_assets(lineage, "kb_documents")
 
     report = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -66,8 +74,11 @@ def main() -> None:
         "row_count_anomaly": row_result,
         "freshness_minutes": freshness_minutes,
         "kb_text_length_signal": text_result,
+        "kb_freshness_failures": len(kb_freshness_issues),
+        "kb_contract_failures": len(kb_failed),
         "contract_slo": contract_slo,
         "sample_blast_radius_from_stg_orders": blast_radius,
+        "sample_blast_radius_from_kb_documents": kb_blast,
     }
     out = ROOT / "reports" / "latest_metrics.json"
     out.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
@@ -79,6 +90,8 @@ def main() -> None:
     print(f"row-count anomaly        : {row_result['is_anomaly']} ({row_result['method']}, score={row_result['score']:.2f})")
     print(f"freshness minutes        : {freshness_minutes:.1f}")
     print(f"KB length anomaly        : {text_result['is_anomaly']}")
+    print(f"KB freshness failures    : {len(kb_freshness_issues)}")
+    print(f"KB blast radius          : {', '.join(kb_blast)}")
     print(f"sample blast radius      : {', '.join(blast_radius)}")
     print(f"report                    : {out.relative_to(ROOT)}")
 
